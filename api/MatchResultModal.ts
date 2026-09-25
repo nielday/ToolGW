@@ -43,12 +43,94 @@ function thieuQuyen(channel: any, client: any): string[] {
  */
 const chuanTen = (s: any) => String(s ?? '').trim();
 
+/**
+ * Phiếu của MỘT lựa chọn: tên lựa chọn + những người đã bấm nó.
+ *
+ * Dùng cho cả poll đang chạy lẫn phiếu gánh sang từ poll cũ (xem route /repost).
+ */
+type Phieu = { text: string; users: { id: string; name: string; avatar: string }[] };
+
+async function docPhieu(message: any): Promise<Phieu[]> {
+  const ra: Phieu[] = [];
+  for (const [, answer] of message.poll.answers) {
+    const voters = await answer.voters.fetch();
+    ra.push({
+      text: answer.text,
+      users: voters.map((v: any) => ({
+        id: v.id,
+        name: normalizeDiscordName(v.displayName || v.username),
+        avatar: v.displayAvatarURL(),
+      })),
+    });
+  }
+  return ra;
+}
+
+/**
+ * Gộp phiếu poll đang chạy với phiếu gánh sang từ poll cũ.
+ *
+ * ⚠️ AI ĐÃ VOTE Ở POLL MỚI THÌ BỎ HẾT PHIẾU CŨ CỦA HỌ, kể cả khi họ chọn lựa chọn khác.
+ * Giữ cả hai thì người đổi ý từ "Tham gia" sang "Không tham gia" sẽ nằm ở CẢ HAI danh sách,
+ * và bảng xếp đội đọc ra một người vừa đi vừa không đi.
+ */
+export function gopPhieu(moi: Phieu[], cu: Phieu[] = []): Phieu[] {
+  if (!cu?.length) return moi;
+  const daVoteLai = new Set(moi.flatMap((p) => p.users.map((u) => u.id)));
+  const ra: Phieu[] = moi.map((p) => ({ text: p.text, users: [...p.users] }));
+  for (const p of cu) {
+    const giu = (p.users || []).filter((u) => !daVoteLai.has(u.id));
+    if (!giu.length) continue;
+    const o = ra.find((x) => chuanTen(x.text) === chuanTen(p.text));
+    if (!o) { ra.push({ text: p.text, users: giu }); continue; }
+    const daCo = new Set(o.users.map((u) => u.id));
+    o.users.push(...giu.filter((u) => !daCo.has(u.id)));
+  }
+  return ra;
+}
+
 function loiQuyen(tenKenh: string, thieu: string[]): string {
   const ds = thieu.length ? `: ${thieu.join(', ')}` : '';
   return `Bot thiếu quyền ở kênh ${tenKenh}${ds}. `
     + 'Cách sửa: vào Discord, chuột phải kênh đó, Chỉnh sửa kênh, mục Quyền, thêm role của bot '
     + 'và bật các quyền trên. Lưu ý "Tạo bình chọn" là quyền RIÊNG, có "Gửi tin nhắn" rồi vẫn '
     + 'có thể thiếu nó.';
+}
+
+/** Mở kênh + soi quyền trước khi gửi. Trả { channel, tenKenh } hoặc { ma, loi } để trả thẳng về client. */
+async function moKenhDangPoll(client: any, channelId: string) {
+  if (!channelId) {
+    return { ma: 400, loi: 'Chưa chọn kênh đăng poll. Vào Cấu hình Discord chọn kênh chữ để đăng poll.' };
+  }
+  const channel: any = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel) {
+    return { ma: 400, loi: `Không mở được kênh (ID: ${channelId}). Kênh đã bị xoá, hoặc bot không có quyền Xem kênh.` };
+  }
+  if (!channel.isTextBased()) {
+    return { ma: 400, loi: `Kênh ${channel.name ? `#${channel.name}` : channelId} không nhận tin nhắn. Chọn một kênh chữ để đăng poll.` };
+  }
+  const tenKenh = channel.name ? `#${channel.name}` : `ID ${channelId}`;
+  // Soi quyền TRƯỚC KHI gửi. Để Discord từ chối rồi mới đoán ngược thì chỉ có đúng hai chữ
+  // "Missing Permissions" mà lần.
+  const thieu = thieuQuyen(channel, client);
+  if (thieu.length) return { ma: 403, loi: loiQuyen(tenKenh, thieu) };
+  return { channel, tenKenh };
+}
+
+/** Gửi poll, đổi lỗi 50013 của Discord thành câu chỉ đúng chỗ cần sửa. */
+async function guiPoll(channel: any, tenKenh: string, client: any, poll: any) {
+  try {
+    return await channel.send({ poll });
+  } catch (e: any) {
+    // 50013 = Missing Permissions. Bảng quyền ở trên có thể nói "đủ" mà vẫn trượt: quyền
+    // theo role bị một overwrite khác của kênh đè xuống. Vẫn phải chỉ đường chứ đừng ném
+    // nguyên chuỗi tiếng Anh của Discord ra màn hình.
+    if (e?.code === 50013) {
+      const err: any = new Error(loiQuyen(tenKenh, thieuQuyen(channel, client)));
+      err.ma = 403;
+      throw err;
+    }
+    throw e;
+  }
 }
 
 router.post('/poll/:groupID', async (req, res) => {
@@ -66,26 +148,9 @@ router.post('/poll/:groupID', async (req, res) => {
     // kênh VOICE (tool bắt buộc voice để lấy danh sách thành viên) -> poll chui vào khung
     // chat của kênh voice, báo thành công mà không ai thấy.
     const channelId = bodyChannelId || data.pollChannelId || data.channelId;
-    if (!channelId) {
-      return res.status(400).json({ error: 'Chưa chọn kênh đăng poll. Vào Cấu hình Discord chọn kênh chữ để đăng poll.' });
-    }
-    const channel: any = await client.channels.fetch(channelId).catch(() => null);
-
-    if (!channel) {
-      return res.status(400).json({ error: `Không mở được kênh (ID: ${channelId}). Kênh đã bị xoá, hoặc bot không có quyền Xem kênh.` });
-    }
-    if (!channel.isTextBased()) {
-      return res.status(400).json({ error: `Kênh ${channel.name ? `#${channel.name}` : channelId} không nhận tin nhắn. Chọn một kênh chữ để đăng poll.` });
-    }
-
-    const tenKenh = channel.name ? `#${channel.name}` : `ID ${channelId}`;
-
-    // Soi quyền TRƯỚC KHI gửi. Để Discord từ chối rồi mới đoán ngược thì chỉ có đúng hai chữ
-    // "Missing Permissions" mà lần.
-    const thieu = thieuQuyen(channel, client);
-    if (thieu.length) {
-      return res.status(403).json({ error: loiQuyen(tenKenh, thieu) });
-    }
+    const kenh = await moKenhDangPoll(client, channelId);
+    if (kenh.loi) return res.status(kenh.ma!).json({ error: kenh.loi });
+    const { channel, tenKenh } = kenh as { channel: any; tenKenh: string };
 
     const pollQuestion = chuanTen(question) || "Mọi người tiếp tục đánh hay nghỉ?";
     // CẮT khoảng trắng thừa ngay từ lúc tạo. Discord cắt của nó, mình không cắt thì hai bên
@@ -99,25 +164,14 @@ router.post('/poll/:groupID', async (req, res) => {
           { text: "Dự bị (Nhường slot, sẽ tham gia nếu thiếu người)" }
         ];
 
-    let message: any;
-    try {
-      message = await channel.send({
-        poll: {
-          question: { text: pollQuestion },
-          answers: pollAnswers,
-          allowMultiselect: allowMultiselect ?? false,
-          duration: duration ?? 168
-        }
-      });
-    } catch (e: any) {
-      // 50013 = Missing Permissions. Bảng quyền ở trên có thể nói "đủ" mà vẫn trượt: quyền
-      // theo role bị một overwrite khác của kênh đè xuống. Vẫn phải chỉ đường chứ đừng ném
-      // nguyên chuỗi tiếng Anh của Discord ra màn hình.
-      if (e?.code === 50013) {
-        return res.status(403).json({ error: loiQuyen(tenKenh, thieuQuyen(channel, client)) });
-      }
-      throw e;
-    }
+    const choPhep = allowMultiselect ?? false;
+    const gioChay = duration ?? 168;
+    const message: any = await guiPoll(channel, tenKenh, client, {
+      question: { text: pollQuestion },
+      answers: pollAnswers,
+      allowMultiselect: choPhep,
+      duration: gioChay,
+    });
 
     const pollState = {
       messageId: message.id,
@@ -126,6 +180,12 @@ router.post('/poll/:groupID', async (req, res) => {
       createdAt: Date.now(),
       isGvg: isGvg || false,
       answers: pollAnswers.map((a: any) => a.text),
+      // Ba trường dưới để route /repost dựng lại y hệt poll này. Trước đây không lưu câu hỏi
+      // nên gửi lại là mất câu hỏi gốc, phải đọc ngược từ tin nhắn cũ — mà tin cũ có thể đã
+      // bị xoá, đúng lúc cần gửi lại nhất.
+      question: pollQuestion,
+      allowMultiselect: choPhep,
+      duration: gioChay,
       // Khoá của bảng ánh xạ cũng phải chuẩn hoá, không thì nó lệch với answers vừa cắt ở trên.
       optionMappings: optionMappings
         ? Object.fromEntries(Object.entries(optionMappings).map(([k, v]) => [chuanTen(k), v]))
@@ -164,6 +224,91 @@ router.get('/poll/:groupID', async (req, res) => {
     res.json(poll);
   } catch (error) {
     res.json(null);
+  }
+});
+
+/**
+ * GỬI LẠI POLL — poll cũ bị trôi lên trên trong kênh thì đăng lại một cái y hệt ở cuối kênh,
+ * mà VẪN GIỮ những người đã vote.
+ *
+ * ⚠️ Discord KHÔNG cho bỏ phiếu hộ ai qua API, nên poll mới luôn bắt đầu từ 0 phiếu và không
+ * có cách nào bê phiếu cũ sang bài mới. Cách duy nhất là tool tự nhớ: đọc hết người đã vote ở
+ * poll cũ, cất vào `phieuCu`, rồi lúc đọc kết quả thì gộp hai bên. Người đã vote KHÔNG phải
+ * vote lại, nhưng con số hiện trên bài poll mới ở Discord vẫn đếm từ 0 — đó là giới hạn của
+ * Discord chứ không phải lỗi. Ai vote lại ở bài mới thì phiếu mới đè lên phiếu cũ (xem gopPhieu).
+ *
+ * Poll cũ bị ĐÓNG chứ không xoá: mỗi lúc chỉ nên có một chỗ vote, và bài cũ vẫn còn đó cho ai
+ * muốn xem lại. Bài cũ đã bị xoá tay thì vẫn gửi lại được, dùng phiếu đã cất từ lần trước.
+ */
+router.post('/poll/:groupID/repost', async (req, res) => {
+  const { groupID } = req.params;
+  const pollType = req.query.type === 'gvg' ? 'gvg' : 'regular';
+  const stateFile = pollType === 'gvg' ? `${groupID}/gvg-poll-state` : `${groupID}/poll-state`;
+  const client = await getDiscordClient(groupID);
+  if (!client || !client.isReady()) {
+    return res.status(400).json({ error: 'Bot is not connected' });
+  }
+
+  try {
+    const localData = loadDb();
+    const pollState = localData.groups[groupID]?.polls?.[pollType] || null;
+    if (!pollState) {
+      return res.status(400).json({ error: 'Chưa có poll nào đang chạy để gửi lại.' });
+    }
+
+    // 1. Gom phiếu: phiếu đang có trên bài cũ + phiếu đã cất từ những lần gửi lại trước.
+    let phieuCu: Phieu[] = Array.isArray(pollState.phieuCu) ? pollState.phieuCu : [];
+    let mat = false;   // bài cũ còn hay đã bị xoá
+    try {
+      const kenhCu: any = await client.channels.fetch(pollState.channelId);
+      const tinCu = await kenhCu.messages.fetch(pollState.messageId);
+      if (tinCu?.poll) {
+        phieuCu = gopPhieu(await docPhieu(tinCu), phieuCu);
+        // Đóng bài cũ SAU KHI đã đọc xong phiếu.
+        if (!tinCu.poll.resultsFinalized) await tinCu.poll.end().catch(() => {});
+      }
+    } catch (e: any) {
+      // 10008 = tin nhắn không còn. Không sao: phiếu lần trước đã cất trong DB.
+      if (e?.code !== 10008) console.error('[repost] Không đọc được poll cũ:', e?.message);
+      mat = true;
+    }
+
+    // 2. Đăng bài mới. Mặc định đăng lại đúng kênh của bài cũ.
+    const cauHinh = localData.groups[groupID]?.configs?.discord || {};
+    const channelId = req.body?.channelId || pollState.channelId || cauHinh.pollChannelId || cauHinh.channelId;
+    const kenh = await moKenhDangPoll(client, channelId);
+    if (kenh.loi) return res.status(kenh.ma!).json({ error: kenh.loi });
+    const { channel, tenKenh } = kenh as { channel: any; tenKenh: string };
+
+    const pollAnswers = (pollState.answers || []).map((t: string) => ({ text: chuanTen(t) })).filter((a: any) => a.text);
+    if (!pollAnswers.length) {
+      return res.status(400).json({ error: 'Poll cũ không còn lựa chọn nào để dựng lại. Tạo poll mới.' });
+    }
+
+    const message: any = await guiPoll(channel, tenKenh, client, {
+      question: { text: chuanTen(pollState.question) || 'Đăng ký tham gia' },
+      answers: pollAnswers,
+      allowMultiselect: pollState.allowMultiselect ?? Boolean(pollState.isGvg),
+      duration: pollState.duration ?? 168,
+    });
+
+    // 3. Ghi lại trạng thái: bài mới, phiếu cũ mang theo, đếm số lần gửi lại.
+    const moi = {
+      ...pollState,
+      messageId: message.id,
+      channelId: message.channelId,
+      guildId: message.guildId,
+      guiLaiLuc: Date.now(),
+      soLanGuiLai: (pollState.soLanGuiLai || 0) + 1,
+      phieuCu,
+    };
+    localData.groups[groupID].polls![pollType] = moi;
+    saveDb(localData);
+    delete pollResultsCache[stateFile];
+
+    res.json({ ...moi, baiCuDaMat: mat, soPhieuGiuLai: phieuCu.reduce((s, p) => s + (p.users?.length || 0), 0) });
+  } catch (error: any) {
+    res.status(error?.ma || 500).json({ error: error.message });
   }
 });
 
@@ -247,16 +392,24 @@ router.get('/poll/results/:groupID', async (req, res) => {
       return res.status(400).json({ error: 'Poll not found' });
     }
     
-    const channel = await client.channels.fetch(pollState.channelId);
-    if (!channel || !channel.isTextBased()) {
-      return res.status(400).json({ error: 'Channel not found' });
+    // Phiếu gánh sang từ những bài poll trước (xem route /repost). Bài hiện tại đọc được thì
+    // gộp thêm vào; bài đã bị xoá mà vẫn còn phiếu cất trong DB thì đọc mỗi phiếu cất — mất
+    // bài poll không được phép làm mất luôn danh sách người đã đăng ký.
+    const phieuCu: Phieu[] = Array.isArray(pollState.phieuCu) ? pollState.phieuCu : [];
+    let phieu: Phieu[] = phieuCu;
+    try {
+      const channel: any = await client.channels.fetch(pollState.channelId);
+      if (!channel || !channel.isTextBased()) throw new Error('Channel not found');
+      const message = await channel.messages.fetch(pollState.messageId);
+      if (!message || !message.poll) throw new Error('Poll not found');
+      phieu = gopPhieu(await docPhieu(message), phieuCu);
+    } catch (e: any) {
+      if (!phieuCu.length) {
+        return res.status(400).json({ error: e?.code === 10008 ? 'Poll not found' : (e?.message || 'Poll not found') });
+      }
+      console.warn('[poll results] Không đọc được bài poll, dùng phiếu đã cất:', e?.message);
     }
-    
-    const message = await channel.messages.fetch(pollState.messageId);
-    if (!message || !message.poll) {
-      return res.status(400).json({ error: 'Poll not found' });
-    }
-    
+
     const results: any = {
       continue: [] as any[],
       backup: [] as any[],
@@ -269,15 +422,7 @@ router.get('/poll/results/:groupID', async (req, res) => {
         users: [] as any[]
       }));
       
-      for (const [answerId, answer] of message.poll.answers) {
-        const text = answer.text;
-        const voters = await answer.voters.fetch();
-        const userObjects = voters.map(v => ({
-          id: v.id,
-          name: normalizeDiscordName(v.displayName || v.username),
-          avatar: v.displayAvatarURL()
-        }));
-        
+      for (const { text, users: userObjects } of phieu) {
         // So theo tên ĐÃ CHUẨN HOÁ. So chuỗi thô là lệch ngay khi có dấu cách thừa, và nhánh
         // "không khớp" bên dưới lại đẻ thêm một lựa chọn mới ở cuối, đúng chỗ mà giao diện
         // không bao giờ trỏ tới.
@@ -289,15 +434,7 @@ router.get('/poll/results/:groupID', async (req, res) => {
         }
       }
     } else {
-      for (const [answerId, answer] of message.poll.answers) {
-        const text = answer.text;
-        const voters = await answer.voters.fetch();
-        const userObjects = voters.map(v => ({
-          id: v.id,
-          name: normalizeDiscordName(v.displayName || v.username),
-          avatar: v.displayAvatarURL()
-        }));
-
+      for (const { text, users: userObjects } of phieu) {
         // Bảng ánh xạ cũng khoá theo TÊN nên dính đúng bẫy dấu cách. Tra thẳng trước, trượt
         // thì dò lại theo tên đã chuẩn hoá.
         const bang = pollState.optionMappings || {};

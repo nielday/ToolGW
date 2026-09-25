@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Settings, Power, PowerOff, Check, RefreshCw, Calendar, BarChart2, X, Trash2, Plus, Globe, Map, Send } from 'lucide-react';
+import { Users, Settings, Power, PowerOff, Check, RefreshCw, Calendar, BarChart2, X, Trash2, Plus, Globe, Map, Send, Repeat } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DiscordChannel } from '../models';
 import { UserInfo } from './UserInfo';
@@ -28,6 +28,7 @@ interface AppHeaderProps {
   handleCreateGvGPoll: (pollData: { question: string; answers: string[] }) => Promise<boolean>;
   handleClosePoll: () => void;
   handleCloseGvgPoll: () => void;
+  handleRepostPoll: (loai?: 'regular' | 'gvg') => Promise<any>;
   showToast: (message: string, type: 'success' | 'error') => void;
   onPostLineup: () => Promise<void>;
 }
@@ -55,6 +56,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   handleCreateGvGPoll,
   handleClosePoll,
   handleCloseGvgPoll,
+  handleRepostPoll,
   showToast,
   onPostLineup
 }) => {
@@ -141,6 +143,22 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       showToast(error?.message || t('header.postLineupError'), 'error');
     } finally {
       setIsPostingLineup(false);
+    }
+  };
+
+  // Gửi lại poll đang chạy. Bài cũ bị đóng, bài mới nằm cuối kênh, người đã vote giữ nguyên.
+  const wrappedRepostPoll = async (loai: 'regular' | 'gvg') => {
+    const dangGvg = loai === 'gvg';
+    (dangGvg ? setIsGvgActionLoading : setIsPollActionLoading)(true);
+    try {
+      const data = await handleRepostPoll(loai);
+      // Nói luôn giữ được bao nhiêu phiếu: người bấm cần biết phiếu cũ còn hay mất, đó là
+      // toàn bộ lý do họ bấm nút này thay vì tạo poll mới.
+      showToast(t('header.repostPollSuccess', { count: data?.soPhieuGiuLai ?? 0 }), 'success');
+    } catch (error: any) {
+      showToast(error?.message || t('header.repostPollError'), 'error');
+    } finally {
+      (dangGvg ? setIsGvgActionLoading : setIsPollActionLoading)(false);
     }
   };
 
@@ -298,6 +316,21 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             <span className="hidden lg:inline">{isGvgActionLoading ? t('common.processing') : activeGvgPoll ? t('header.closeGvgPoll') : t('header.openGvgPoll')}</span>
           </motion.button>
 
+          {/* Gửi lại — chỉ hiện khi đang có poll. Nút hẹp, chỉ có icon: đây là việc thỉnh
+              thoảng mới cần, không nên chiếm chỗ ngang hàng hai nút chính. */}
+          {activeGvgPoll && (
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => wrappedRepostPoll('gvg')}
+              disabled={!isConnected || isGvgActionLoading}
+              className="flex items-center rounded-md px-2.5 py-2 text-sm font-medium text-white transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed bg-[#4E5058] hover:bg-[#6D6F78]"
+              title={t('header.repostGvgPollTitle')}
+            >
+              <Repeat size={16} />
+            </motion.button>
+          )}
+
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -309,6 +342,19 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             {isPollActionLoading ? <RefreshCw size={16} className="animate-spin" /> : <BarChart2 size={16} />}
             <span className="hidden lg:inline">{isPollActionLoading ? t('common.processing') : activePoll ? t('header.closePoll') : t('header.createPoll')}</span>
           </motion.button>
+
+          {activePoll && (
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => wrappedRepostPoll('regular')}
+              disabled={!isConnected || isPollActionLoading}
+              className="flex items-center rounded-md px-2.5 py-2 text-sm font-medium text-white transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed bg-[#4E5058] hover:bg-[#6D6F78]"
+              title={t('header.repostPollTitle')}
+            >
+              <Repeat size={16} />
+            </motion.button>
+          )}
 
           {/* Đăng đội hình đã xếp ra kênh Discord. Khoá lại khi bot chưa kết nối, vì bấm
               lúc đó chỉ nhận lỗi từ server chứ không làm được gì. */}

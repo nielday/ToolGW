@@ -153,6 +153,24 @@ export function useTeamManager(isConnected: boolean, groupID: string, username: 
     }
   };
 
+  /**
+   * Gửi lại poll: đăng một bài poll y hệt ở cuối kênh khi bài cũ đã trôi, giữ nguyên những
+   * người đã vote (máy chủ cất phiếu cũ rồi gộp vào kết quả, xem api/MatchResultModal.ts).
+   */
+  const handleRepostPoll = async (loai: 'regular' | 'gvg' = 'regular') => {
+    const duong = loai === 'gvg' ? `/api/poll/${groupID}/repost?type=gvg` : `/api/poll/${groupID}/repost`;
+    const res = await fetch(duong, { method: 'POST' });
+    if (!res.ok) {
+      // Ném nguyên câu của máy chủ, xem chú thích ở handleCreatePoll.
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || t('header.repostPollError'));
+    }
+    const data = await res.json();
+    if (loai === 'gvg') setActiveGvgPoll({ ...data, isGvg: true });
+    else setActivePoll(data);
+    return data;
+  };
+
   const handleClosePoll = async () => {
     try {
       const res = await fetch(`/api/poll/${groupID}/close`, { method: 'POST' });
@@ -1516,6 +1534,7 @@ export function useTeamManager(isConnected: boolean, groupID: string, username: 
     handleCreateGvGPoll,
     handleClosePoll,
     handleCloseGvgPoll,
+    handleRepostPoll,
     handleAddArea,
     handleDeleteArea,
     handleRenameArea,

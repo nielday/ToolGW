@@ -823,6 +823,7 @@ export default function App() {
         handleCreateGvGPoll={(data) => teamManager.handleCreateGvGPoll({ ...data, channelId: selectedChannelId })}
         handleClosePoll={teamManager.handleClosePoll}
         handleCloseGvgPoll={teamManager.handleCloseGvgPoll}
+        handleRepostPoll={teamManager.handleRepostPoll}
         showToast={showToast}
       />
 
