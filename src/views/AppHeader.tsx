@@ -28,7 +28,7 @@ interface AppHeaderProps {
   handleCreateGvGPoll: (pollData: { question: string; answers: string[] }) => Promise<boolean>;
   handleClosePoll: () => void;
   handleCloseGvgPoll: () => void;
-  handleRepostPoll: (loai?: 'regular' | 'gvg') => Promise<any>;
+  handleRepostPoll: (loai?: 'regular' | 'gvg', question?: string) => Promise<any>;
   closedGvgPoll: any;
   showToast: (message: string, type: 'success' | 'error') => void;
   onPostLineup: () => Promise<void>;
@@ -151,9 +151,15 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   // Gửi lại poll đang chạy. Bài cũ bị đóng, bài mới nằm cuối kênh, người đã vote giữ nguyên.
   const wrappedRepostPoll = async (loai: 'regular' | 'gvg') => {
     const dangGvg = loai === 'gvg';
+    // Hỏi tiêu đề trước khi đăng, điền sẵn tiêu đề hiện tại (Enter là giữ nguyên). Thêm bước
+    // này vì Discord không cho sửa poll đã đăng: tiêu đề sai chỉ sửa được lúc gửi lại, và
+    // bài tạo từ bản cũ còn không lưu tiêu đề trong DB. Bấm Huỷ là không gửi.
+    const hienTai = (dangGvg ? (activeGvgPoll || closedGvgPoll) : activePoll)?.question || '';
+    const tieuDe = window.prompt(t('header.repostQuestionPrompt'), hienTai);
+    if (tieuDe === null) return;
     (dangGvg ? setIsGvgActionLoading : setIsPollActionLoading)(true);
     try {
-      const data = await handleRepostPoll(loai);
+      const data = await handleRepostPoll(loai, tieuDe.trim() || undefined);
       // Nói luôn giữ được bao nhiêu phiếu: người bấm cần biết phiếu cũ còn hay mất, đó là
       // toàn bộ lý do họ bấm nút này thay vì tạo poll mới.
       showToast(t('header.repostPollSuccess', { count: data?.soPhieuGiuLai ?? 0 }), 'success');

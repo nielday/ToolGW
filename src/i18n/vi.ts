@@ -66,6 +66,7 @@ export const vi = {
       repostPollSuccess: 'Đã gửi lại, giữ {{count}} phiếu cũ. Ai đã vote không cần vote lại.',
       repostPollError: 'Lỗi khi gửi lại poll',
       restoreGvgPoll: 'Khôi phục',
+      repostQuestionPrompt: 'Tiêu đề của bài gửi lại (Enter để giữ nguyên, để trống là dùng tiêu đề cũ):',
       restoreGvgPollTitle: 'Mở lại bài đăng ký vừa đóng, giữ nguyên người đã vote',
       postLineup: 'Đăng đội hình',
       postLineupTitle: 'Đội hình bang chiến',

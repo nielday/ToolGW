@@ -177,9 +177,13 @@ export function useTeamManager(isConnected: boolean, groupID: string, username: 
    * Gửi lại poll: đăng một bài poll y hệt ở cuối kênh khi bài cũ đã trôi, giữ nguyên những
    * người đã vote (máy chủ cất phiếu cũ rồi gộp vào kết quả, xem api/MatchResultModal.ts).
    */
-  const handleRepostPoll = async (loai: 'regular' | 'gvg' = 'regular') => {
+  const handleRepostPoll = async (loai: 'regular' | 'gvg' = 'regular', question?: string) => {
     const duong = loai === 'gvg' ? `/api/poll/${groupID}/repost?type=gvg` : `/api/poll/${groupID}/repost`;
-    const res = await fetch(duong, { method: 'POST' });
+    const res = await fetch(duong, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(question ? { question } : {}),
+    });
     if (!res.ok) {
       // Ném nguyên câu của máy chủ, xem chú thích ở handleCreatePoll.
       const err = await res.json().catch(() => ({}));

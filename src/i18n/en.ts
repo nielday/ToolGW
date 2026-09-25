@@ -65,6 +65,7 @@ export const en = {
       repostPollSuccess: 'Reposted, kept {{count}} old votes. Those who voted do not need to vote again.',
       repostPollError: 'Error reposting poll',
       restoreGvgPoll: 'Restore',
+      repostQuestionPrompt: 'Title for the reposted poll (press Enter to keep it, leave empty to reuse the old title):',
       restoreGvgPollTitle: 'Reopen the sign-up poll you just closed, keeping everyone who voted',
       postLineup: 'Post lineup',
       postLineupTitle: 'Guild war lineup',

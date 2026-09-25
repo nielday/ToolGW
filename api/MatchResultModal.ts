@@ -88,6 +88,28 @@ export function gopPhieu(moi: Phieu[], cu: Phieu[] = []): Phieu[] {
   return ra;
 }
 
+/**
+ * Dòng chữ đăng ngay dưới bài poll gửi lại, kể ra ai đã được giữ phiếu.
+ *
+ * Vì sao cần: bài mới trên Discord luôn hiện "0 phiếu" (Discord không cho chuyển phiếu), nên
+ * ai nhìn vào cũng tưởng mất sạch đăng ký. Đã xảy ra ngay lần gửi lại đầu tiên 26/09/2026.
+ * Kể tên ra thì mỗi người tự thấy mình còn trong danh sách, khỏi hỏi lại.
+ *
+ * Tên viết chữ thường, KHÔNG tag: tag cả chục người lúc 2 giờ sáng là phá.
+ */
+export function tinGiuPhieu(phieu: Phieu[]): string | null {
+  const co = phieu.filter((p) => p.users?.length);
+  if (!co.length) return null;
+  const soNguoi = new Set(co.flatMap((p) => p.users.map((u) => u.id))).size;
+  const thoat = (s: string) => String(s ?? '').replace(/([\\`*_~|>])/g, '\\$1');
+  const dong = co.map((p) => `**${thoat(p.text)}** (${p.users.length}): ${p.users.map((u) => thoat(u.name)).join(', ')}`);
+  const s = `Bài đăng ký vừa được gửi lại. **${soNguoi} người đã vote vẫn được tính**, không cần vote lại. `
+    + 'Số phiếu trên bài mới đếm lại từ 0 vì Discord không cho chuyển phiếu sang bài mới. '
+    + 'Muốn đổi lựa chọn thì vote ở bài mới, phiếu mới sẽ thay phiếu cũ.\n\n'
+    + dong.join('\n');
+  return s.length > 1900 ? `${s.slice(0, 1900)}…` : s;
+}
+
 function loiQuyen(tenKenh: string, thieu: string[]): string {
   const ds = thieu.length ? `: ${thieu.join(', ')}` : '';
   return `Bot thiếu quyền ở kênh ${tenKenh}${ds}. `
@@ -288,11 +310,26 @@ router.post('/poll/:groupID/repost', async (req, res) => {
     }
 
     const message: any = await guiPoll(channel, tenKenh, client, {
-      question: { text: chuanTen(pollState.question) || 'Đăng ký tham gia' },
+      // Poll tạo trước khi có trường `question` thì DB không có câu hỏi: đọc từ bài cũ trên
+      // Discord. Thiếu bước này là lần gửi lại đầu tiên (26/09/2026) đổi "Đăng ký bang chiến
+      // cuối tuần Thứ 7 + Chủ Nhật" thành câu mặc định "Đăng ký tham gia".
+      // Người bấm gõ tiêu đề mới thì dùng tiêu đề đó (sửa được tiêu đề sai, đổi ngày tháng).
+      question: {
+        text: (chuanTen(req.body?.question) || chuanTen(pollState.question)
+          || chuanTen(tinCu?.poll?.question?.text) || 'Đăng ký tham gia').slice(0, 300),
+      },
       answers: pollAnswers,
       allowMultiselect: pollState.allowMultiselect ?? Boolean(pollState.isGvg),
       duration: pollState.duration ?? 168,
     });
+
+    // Kể tên người được giữ phiếu ngay dưới bài mới. Hỏng thì thôi, không được làm hỏng
+    // cả lượt gửi lại vì một dòng chú thích.
+    const ghiChu = tinGiuPhieu(phieuCu);
+    if (ghiChu) {
+      await message.reply({ content: ghiChu, allowedMentions: { parse: [], repliedUser: false } })
+        .catch((e: any) => console.error('[repost] Không đăng được dòng giữ phiếu:', e?.message));
+    }
 
     // 3. Bài mới đã lên thì mới đóng bài cũ, để mỗi lúc chỉ có một chỗ vote.
     if (tinCu?.poll && !tinCu.poll.resultsFinalized) {
@@ -302,6 +339,8 @@ router.post('/poll/:groupID/repost', async (req, res) => {
     // 4. Ghi lại trạng thái: bài mới, phiếu cũ mang theo, đếm số lần gửi lại.
     const moi = {
       ...pollState,
+      // Cất câu hỏi thật vào DB, lần gửi lại sau khỏi phải đọc ngược từ Discord nữa.
+      question: chuanTen(message.poll?.question?.text) || pollState.question,
       // Gửi lại cũng là đường KHÔI PHỤC bài đăng ký lỡ tay đóng (GvG đóng chỉ gắn isClosed,
       // vẫn giữ nguyên trạng thái). Bài mới đã lên thì poll phải mở lại, không thì giao diện
       // coi như vẫn đóng và giấu mất bài vừa đăng.
