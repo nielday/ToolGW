@@ -19,6 +19,20 @@ const nhoThietLapDangMo = (g: string, id: string | null) => {
   } catch { /* chế độ riêng tư chặn localStorage thì thôi, không đáng để vỡ cả trang */ }
 };
 
+/**
+ * Bài đăng ký GvG đã đóng này có nên mời khôi phục không.
+ *
+ * Chỉ bài đóng trong 7 ngày: đóng GvG thì máy chủ giữ nguyên trạng thái trong DB cho tới lần
+ * mở đăng ký kế tiếp, nên không giới hạn thì bài của tuần trước vẫn lấp ló nút khôi phục.
+ * Bài đóng trước khi có mốc `dongLuc` thì đo theo lúc tạo.
+ */
+const KHOI_PHUC_TOI_DA_MS = 7 * 24 * 3600_000;
+function conKhoiPhucDuoc(p: any): boolean {
+  if (!p?.isClosed || !p.messageId) return false;
+  const moc = p.dongLuc || p.createdAt || 0;
+  return Date.now() - moc < KHOI_PHUC_TOI_DA_MS;
+}
+
 export function useTeamManager(isConnected: boolean, groupID: string, username: string = 'Unknown', showToast?: (msg: string, type: 'success' | 'error' | 'info') => void) {
   const { t } = useTranslation();
   const [unassignedMembers, setUnassignedMembers] = useState<Member[]>(initialUnassigned);
@@ -38,6 +52,9 @@ export function useTeamManager(isConnected: boolean, groupID: string, username: 
 
   const [activePoll, setActivePoll] = useState<any>(null);
   const [activeGvgPoll, setActiveGvgPoll] = useState<any>(null);
+  // Bài đăng ký GvG VỪA ĐÓNG, còn khôi phục được (máy chủ đóng GvG chỉ gắn isClosed, giữ
+  // nguyên trạng thái). Có cái này thì header hiện nút khôi phục, cứu cú lỡ tay bấm Đóng.
+  const [closedGvgPoll, setClosedGvgPoll] = useState<any>(null);
   const [gvgPollOptions, setGvgPollOptions] = useState<string[]>([]);
   const [gvgOptionIndex, setGvgOptionIndex] = useState<number | null>(null);
 
@@ -51,6 +68,7 @@ export function useTeamManager(isConnected: boolean, groupID: string, username: 
     if (!groupID) {
       setActivePoll(null);
       setActiveGvgPoll(null);
+      setClosedGvgPoll(null);
       setGvgPollOptions([]);
       return;
     }
@@ -73,6 +91,7 @@ export function useTeamManager(isConnected: boolean, groupID: string, username: 
         const resGvg = await fetch(`/api/poll/${groupID}?type=gvg`);
         if (resGvg.ok) {
           const dataGvg = await resGvg.json();
+          setClosedGvgPoll(conKhoiPhucDuoc(dataGvg) ? dataGvg : null);
           if (dataGvg && !dataGvg.isClosed) {
             setActiveGvgPoll(dataGvg);
             if (dataGvg.isGvg && dataGvg.answers) {
@@ -136,6 +155,7 @@ export function useTeamManager(isConnected: boolean, groupID: string, username: 
       if (res.ok) {
         const data = await res.json();
         setActiveGvgPoll({ ...data, isGvg: true });
+        setClosedGvgPoll(null);   // tạo bài mới là ghi đè bài đã đóng, hết đường khôi phục
         setGvgPollOptions(pollData.answers);
         setGvgOptionIndex(null);
         if (memberSource === 'gvg') {
@@ -166,8 +186,13 @@ export function useTeamManager(isConnected: boolean, groupID: string, username: 
       throw new Error(err.error || t('header.repostPollError'));
     }
     const data = await res.json();
-    if (loai === 'gvg') setActiveGvgPoll({ ...data, isGvg: true });
-    else setActivePoll(data);
+    if (loai === 'gvg') {
+      setActiveGvgPoll({ ...data, isGvg: true });
+      setClosedGvgPoll(null);
+      if (Array.isArray(data.answers)) setGvgPollOptions(data.answers);
+    } else {
+      setActivePoll(data);
+    }
     return data;
   };
 
@@ -192,6 +217,7 @@ export function useTeamManager(isConnected: boolean, groupID: string, username: 
     try {
       const res = await fetch(`/api/poll/${groupID}/close?type=gvg`, { method: 'POST' });
       if (res.ok) {
+        if (activeGvgPoll) setClosedGvgPoll({ ...activeGvgPoll, isClosed: true, dongLuc: Date.now() });
         setActiveGvgPoll(null);
       } else {
         const err = await res.json();
@@ -1535,6 +1561,7 @@ export function useTeamManager(isConnected: boolean, groupID: string, username: 
     handleClosePoll,
     handleCloseGvgPoll,
     handleRepostPoll,
+    closedGvgPoll,
     handleAddArea,
     handleDeleteArea,
     handleRenameArea,

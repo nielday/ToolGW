@@ -29,6 +29,7 @@ interface AppHeaderProps {
   handleClosePoll: () => void;
   handleCloseGvgPoll: () => void;
   handleRepostPoll: (loai?: 'regular' | 'gvg') => Promise<any>;
+  closedGvgPoll: any;
   showToast: (message: string, type: 'success' | 'error') => void;
   onPostLineup: () => Promise<void>;
 }
@@ -57,6 +58,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   handleClosePoll,
   handleCloseGvgPoll,
   handleRepostPoll,
+  closedGvgPoll,
   showToast,
   onPostLineup
 }) => {
@@ -318,16 +320,20 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
           {/* Gửi lại — chỉ hiện khi đang có poll. Nút hẹp, chỉ có icon: đây là việc thỉnh
               thoảng mới cần, không nên chiếm chỗ ngang hàng hai nút chính. */}
-          {activeGvgPoll && (
+          {/* Hiện cả khi bài đăng ký VỪA BỊ ĐÓNG: cùng một nút, lúc đó nó là nút khôi phục
+              (đăng lại bài y hệt, giữ nguyên người đã vote). Có chữ để khỏi nhầm với nút Mở
+              đăng ký bên cạnh, vốn tạo bài mới tinh và mất hết phiếu cũ. */}
+          {(activeGvgPoll || closedGvgPoll) && (
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => wrappedRepostPoll('gvg')}
               disabled={!isConnected || isGvgActionLoading}
-              className="flex items-center rounded-md px-2.5 py-2 text-sm font-medium text-white transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed bg-[#4E5058] hover:bg-[#6D6F78]"
-              title={t('header.repostGvgPollTitle')}
+              className={`flex items-center gap-2 rounded-md py-2 text-sm font-medium text-white transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed bg-[#4E5058] hover:bg-[#6D6F78] ${activeGvgPoll ? 'px-2.5' : 'px-3'}`}
+              title={activeGvgPoll ? t('header.repostGvgPollTitle') : t('header.restoreGvgPollTitle')}
             >
               <Repeat size={16} />
+              {!activeGvgPoll && <span className="hidden lg:inline">{t('header.restoreGvgPoll')}</span>}
             </motion.button>
           )}
 

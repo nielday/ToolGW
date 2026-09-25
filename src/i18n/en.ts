@@ -64,6 +64,8 @@ export const en = {
       repostGvgPollTitle: 'Repost the sign-up poll at the bottom of the channel (keeps everyone who voted)',
       repostPollSuccess: 'Reposted, kept {{count}} old votes. Those who voted do not need to vote again.',
       repostPollError: 'Error reposting poll',
+      restoreGvgPoll: 'Restore',
+      restoreGvgPollTitle: 'Reopen the sign-up poll you just closed, keeping everyone who voted',
       postLineup: 'Post lineup',
       postLineupTitle: 'Guild war lineup',
       postLineupSuccess: 'Lineup posted to Discord',

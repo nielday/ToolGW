@@ -302,6 +302,11 @@ router.post('/poll/:groupID/repost', async (req, res) => {
     // 4. Ghi lại trạng thái: bài mới, phiếu cũ mang theo, đếm số lần gửi lại.
     const moi = {
       ...pollState,
+      // Gửi lại cũng là đường KHÔI PHỤC bài đăng ký lỡ tay đóng (GvG đóng chỉ gắn isClosed,
+      // vẫn giữ nguyên trạng thái). Bài mới đã lên thì poll phải mở lại, không thì giao diện
+      // coi như vẫn đóng và giấu mất bài vừa đăng.
+      isClosed: false,
+      dongLuc: undefined,
       messageId: message.id,
       channelId: message.channelId,
       guildId: message.guildId,
@@ -355,6 +360,9 @@ router.post('/poll/:groupID/close', async (req, res) => {
       if (req.query.type === 'gvg') {
         if (localData.groups[groupID] && localData.groups[groupID].polls && localData.groups[groupID].polls![pollType]) {
           localData.groups[groupID].polls![pollType].isClosed = true;
+          // Mốc đóng để giao diện chỉ mời khôi phục bài vừa đóng gần đây, không phải bài từ
+          // mấy tuần trước còn nằm lại trong DB.
+          localData.groups[groupID].polls![pollType].dongLuc = Date.now();
         }
       } else {
         if (localData.groups[groupID] && localData.groups[groupID].polls) {

@@ -65,6 +65,8 @@ export const vi = {
       repostGvgPollTitle: 'Gửi lại bài đăng ký xuống cuối kênh (giữ nguyên người đã vote)',
       repostPollSuccess: 'Đã gửi lại, giữ {{count}} phiếu cũ. Ai đã vote không cần vote lại.',
       repostPollError: 'Lỗi khi gửi lại poll',
+      restoreGvgPoll: 'Khôi phục',
+      restoreGvgPollTitle: 'Mở lại bài đăng ký vừa đóng, giữ nguyên người đã vote',
       postLineup: 'Đăng đội hình',
       postLineupTitle: 'Đội hình bang chiến',
       postLineupSuccess: 'Đã đăng đội hình lên Discord',

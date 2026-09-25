@@ -824,6 +824,7 @@ export default function App() {
         handleClosePoll={teamManager.handleClosePoll}
         handleCloseGvgPoll={teamManager.handleCloseGvgPoll}
         handleRepostPoll={teamManager.handleRepostPoll}
+        closedGvgPoll={teamManager.closedGvgPoll}
         showToast={showToast}
       />
 
