@@ -257,16 +257,18 @@ router.post('/poll/:groupID/repost', async (req, res) => {
     }
 
     // 1. Gom phiếu: phiếu đang có trên bài cũ + phiếu đã cất từ những lần gửi lại trước.
+    //
+    // ⚠️ CHƯA ĐƯỢC ĐÓNG BÀI CŨ Ở ĐÂY. Bản đầu đóng ngay sau khi đọc phiếu, rồi mới đăng bài
+    // mới. 26/09/2026 bot bị cấm Gửi tin nhắn ở #bang-chiến: đăng hỏng, mà bài đăng ký cuối
+    // tuần (24 phiếu) thì đã bị đóng, không ai vote thêm được nữa. Chỉ đóng SAU KHI bài mới
+    // đã lên (bước 3).
     let phieuCu: Phieu[] = Array.isArray(pollState.phieuCu) ? pollState.phieuCu : [];
     let mat = false;   // bài cũ còn hay đã bị xoá
+    let tinCu: any = null;
     try {
       const kenhCu: any = await client.channels.fetch(pollState.channelId);
-      const tinCu = await kenhCu.messages.fetch(pollState.messageId);
-      if (tinCu?.poll) {
-        phieuCu = gopPhieu(await docPhieu(tinCu), phieuCu);
-        // Đóng bài cũ SAU KHI đã đọc xong phiếu.
-        if (!tinCu.poll.resultsFinalized) await tinCu.poll.end().catch(() => {});
-      }
+      tinCu = await kenhCu.messages.fetch(pollState.messageId);
+      if (tinCu?.poll) phieuCu = gopPhieu(await docPhieu(tinCu), phieuCu);
     } catch (e: any) {
       // 10008 = tin nhắn không còn. Không sao: phiếu lần trước đã cất trong DB.
       if (e?.code !== 10008) console.error('[repost] Không đọc được poll cũ:', e?.message);
@@ -292,7 +294,12 @@ router.post('/poll/:groupID/repost', async (req, res) => {
       duration: pollState.duration ?? 168,
     });
 
-    // 3. Ghi lại trạng thái: bài mới, phiếu cũ mang theo, đếm số lần gửi lại.
+    // 3. Bài mới đã lên thì mới đóng bài cũ, để mỗi lúc chỉ có một chỗ vote.
+    if (tinCu?.poll && !tinCu.poll.resultsFinalized) {
+      await tinCu.poll.end().catch((e: any) => console.error('[repost] Không đóng được poll cũ:', e?.message));
+    }
+
+    // 4. Ghi lại trạng thái: bài mới, phiếu cũ mang theo, đếm số lần gửi lại.
     const moi = {
       ...pollState,
       messageId: message.id,
